@@ -84,7 +84,7 @@ async function payUsdcAndGetReceipt(requirements: X402Requirements["requirements
   }
   
   const data = encodeFunctionData({
-    abi: ERC20_ABI as any,
+    abi: ERC20_ABI,
     functionName: "transfer",
     args: [requirements.recipient, BigInt(requirements.amount)]
   }) as `0x${string}`;
@@ -194,17 +194,21 @@ type MiniAppWindow = Window &
 
 // Provider selection helpers
 function pickInjectedProvider(): EthereumProvider | null {
-  const w = window as any;
+  const w = window as unknown as { ethereum?: { providers?: unknown[]; isCoinbaseWallet?: boolean; isMetaMask?: boolean } };
   const { ethereum } = w;
 
   // Multiple providers case
-  const providers: any[] = Array.isArray(ethereum?.providers)
+  const providers: unknown[] = Array.isArray(ethereum?.providers)
     ? ethereum.providers
     : (ethereum ? [ethereum] : []);
 
   // Prefer Coinbase Wallet extension if present, otherwise MetaMask, else first injected
-  const cbw = providers.find((p) => p?.isCoinbaseWallet);
-  const mm  = providers.find((p) => p?.isMetaMask);
+  const cbw = providers.find((p): p is { isCoinbaseWallet: boolean } => 
+    typeof p === 'object' && p !== null && 'isCoinbaseWallet' in p && Boolean((p as { isCoinbaseWallet: boolean }).isCoinbaseWallet)
+  );
+  const mm = providers.find((p): p is { isMetaMask: boolean } => 
+    typeof p === 'object' && p !== null && 'isMetaMask' in p && Boolean((p as { isMetaMask: boolean }).isMetaMask)
+  );
   return (cbw || mm || providers[0] || null) as EthereumProvider | null;
 }
 
@@ -321,25 +325,6 @@ async function computeForgeHash(payload: string) {
     .join("");
 }
 
-async function ensureWalletOnBaseSepolia(provider: EthereumProvider) {
-  if (!provider?.request) return;
-  try {
-    await provider.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: BASE_SEPOLIA_CHAIN_ID }],
-    });
-  } catch (error) {
-    const err = error as { code?: number; message?: string };
-    if (err?.code === 4902 || err?.message?.includes("not found")) {
-      await provider.request({
-        method: "wallet_addEthereumChain",
-        params: [BASE_SEPOLIA_PARAMS],
-      });
-    } else {
-      throw err ?? error;
-    }
-  }
-}
 
 export default function Home() {
   const { isFrameReady, setFrameReady, context } = useMiniKit();
@@ -463,8 +448,8 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
       coinbaseConnect: !!coinbaseWalletMiniApp?.connect,
       ethereum: !!ethereum,
       ethereumRequest: !!ethereum?.request,
-      windowEthereum: !!(window as any).ethereum,
-      windowCoinbaseWalletMiniApp: !!(window as any).coinbaseWalletMiniApp
+      windowEthereum: !!(window as unknown as { ethereum: unknown }).ethereum,
+      windowCoinbaseWalletMiniApp: !!(window as unknown as { coinbaseWalletMiniApp: unknown }).coinbaseWalletMiniApp
     });
     
     return {
@@ -531,12 +516,13 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
           setWalletAddress(address);
           setConnected(true);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Handle common provider errors
-        const code = err?.code ?? err?.data?.code;
+        const error = err as { code?: number; data?: { code?: number } };
+        const code = error?.code ?? error?.data?.code;
         if (code === -32002) {
           setFeedback("Connection request already pending—open your wallet extension popup.", "error");
-        return;
+          return;
         }
         if (code === 4001) {
           setFeedback("Connection cancelled.", "error");
@@ -552,9 +538,10 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
           method: "wallet_switchEthereumChain",
           params: [{ chainId: BASE_SEPOLIA_CHAIN_ID }],
         });
-      } catch (err: any) {
-        const code = err?.code ?? err?.data?.code;
-        if (code === 4902 || `${err?.message ?? ""}`.includes("not found")) {
+      } catch (err: unknown) {
+        const error = err as { code?: number; data?: { code?: number }; message?: string };
+        const code = error?.code ?? error?.data?.code;
+        if (code === 4902 || `${error?.message ?? ""}`.includes("not found")) {
           await injected.request({
             method: "wallet_addEthereumChain",
             params: [BASE_SEPOLIA_PARAMS],
@@ -569,13 +556,14 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
       setNetwork((typeof chainId === "string" && chainId.toLowerCase() === BASE_SEPOLIA_CHAIN_ID) ? "Base Sepolia" : `Chain ${chainId}`);
 
       setFeedback("Wallet connected.", "success");
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Coinbase extension sometimes throws a generic "Unexpected error"
-      const msg = `${error?.message || ""}`.toLowerCase();
+      const err = error as { message?: string };
+      const msg = `${err?.message || ""}`.toLowerCase();
       if (msg.includes("unexpected error")) {
         setFeedback("Open the Coinbase Wallet extension window (chrome toolbar) and approve the request.", "error");
       } else {
-        setFeedback(error?.message || "Failed to connect wallet.", "error");
+        setFeedback(err?.message || "Failed to connect wallet.", "error");
       }
       console.error("Wallet connection error:", error);
     } finally {
@@ -626,7 +614,7 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
       }
 
       // Show payment details to user
-      const { asset, amount, recipient, chain } = requirementsData.requirements;
+      const { amount, recipient, chain } = requirementsData.requirements;
       const usdcAmount = (parseInt(amount) / 1000000).toFixed(2); // Convert from wei to USDC
       setFeedback(`Paying ${usdcAmount} USDC to ${recipient.slice(0, 6)}...${recipient.slice(-4)} on ${chain}...`, "muted");
       
