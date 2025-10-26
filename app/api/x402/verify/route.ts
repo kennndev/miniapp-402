@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createPublicClient, http } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { verifyReceiptHmac, signReceiptHmac, X402Receipt } from "@/lib/x402";
+import { signReceiptHmac, X402Receipt } from "@/lib/x402";
 
 const USDC_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   }
 
   // topics[1] = from, topics[2] = to (indexed). data = amount (32-byte)
-  const to = `0x${transferLog.topics[2].slice(26)}` as `0x${string}`;
+  const to = `0x${transferLog.topics[2]?.slice(26) || ""}` as `0x${string}`;
   const amount = BigInt(transferLog.data);
 
   if (to.toLowerCase() !== RECEIVING_WALLET.toLowerCase()) {
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Build and sign a receipt (to be used as X-PAYMENT header)
-  const payer = `0x${transferLog.topics[1].slice(26)}` as `0x${string}`;
+  const payer = `0x${transferLog.topics[1]?.slice(26) || ""}` as `0x${string}`;
   const receiptObj: X402Receipt = {
     nonce: txHash, // for demo, use txHash as nonce
     txHash,
